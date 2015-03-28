@@ -1,12 +1,18 @@
 'use strict';
 
-var config = require('./config.js');
-
+/* Edit these variables to suit your needs */
+var PLAYER_NAME = 'family room';
 var LIGHT_SETTINGS = [{light:"LivingColors 1",color:1},{light:"LivingColors 2",color:2}];
 var ERROR_OR_NO_RESULT_COLOR = [{color:"#330033"}];
 var NEXT_SONG_CACHING_ENABLED = true;
 var APP_USERNAME = "sonos-moodring";
 var APP_DESCRIPTION = "Display cover art colors from Sonos";
+var VERBOSE_MODE = true;
+
+/* <><><><><><><><><><><><><><>*/
+/* DO NOT EDIT PAST THIS LINE  */
+
+var config = require('./config.js');
 
 var SonosDiscovery = require('sonos-discovery'),
 	discovery = new SonosDiscovery();
@@ -27,7 +33,7 @@ var colorCache = {};
 // Wait until the Sonos discovery process is done, then grab our player
 discovery.on('topology-change', function() {
     if (!player)
-        player = discovery.getPlayer('family room');
+        player = discovery.getPlayer(PLAYER_NAME);
 })
 
 // If we get a change of state...
@@ -37,56 +43,72 @@ discovery.on('transport-state', function(msg) {
     	return;
     }
 
+    // these will be the keys for our cached lights object: {artistAlbum:[r,g,b]}
 	var currentArtistAlbum = msg.state.currentTrack.artist+msg.state.currentTrack.album;
 	var nextArtistAlbum = msg.state.nextTrack !== undefined?msg.state.nextTrack.artist+msg.state.nextTrack.album:'';
 
+	// If we've already fetched this albumArtist, no need to burn an API call fetching it again
     if (colorCache[currentArtistAlbum] !== undefined && colorCache[currentArtistAlbum].length > 0) {
+		logMe("Got cached results for album "+msg.state.currentTrack.album+" by "+msg.state.currentTrack.artist+".");
     	lightItUp(colorCache[currentArtistAlbum]);
     }
+    // If not, let's grab it
     else if (colorCache[currentArtistAlbum] === undefined) {
     	colorCache[currentArtistAlbum] = [];
+    	// Call our getColors method, passing in a callback to act on the results
     	getColors(msg.state.currentTrack.artist, msg.state.currentTrack.album, function(result) {
+			// If we didn't get anything back, assume no cover art for this artistAlbum, and
+			// set our default colors
 			if (result.body === undefined || result.body.tags === undefined) {
-				console.log("no artwork found");
+				logMe("No artwork found for "+msg.state.currentTrack.album+" by "+msg.state.currentTrack.artist+".");
 				colorCache[currentArtistAlbum] = ERROR_OR_NO_RESULT_COLOR;
 				lightItUp(ERROR_OR_NO_RESULT_COLOR);
 				return;
 			}
+			// ...otherwise, cache our results and set the lights to those results
+			logMe("Fetched color for album "+msg.state.currentTrack.album+" by "+msg.state.currentTrack.artist+".");
 			colorCache[currentArtistAlbum] = result.body.tags;
 			lightItUp(result.body.tags);
     	});
     }
 
+    // If there is no next album, or we've already fetched it, or we've disabled next album caching, finish up
     if (nextArtistAlbum == '' || colorCache[nextArtistAlbum] !== undefined || !NEXT_SONG_CACHING_ENABLED) {
     	return;
     }
+    // otherwise, go through the same flow for the next song (minus the actual setting of the lights)
 	colorCache[nextArtistAlbum] = [];
 	getColors(msg.state.nextTrack.artist, msg.state.nextTrack.album, function(result) {
 		if (result.body === undefined || result.body.tags === undefined) {
-			console.log("no artwork found");
+			logMe("No artwork found for next album "+msg.state.nextTrack.album+" by "+msg.state.nextTrack.artist+".");
 			colorCache[nextArtistAlbum] = ERROR_OR_NO_RESULT_COLOR;
 			return;
 		}
+		logMe("Cached next album "+msg.state.nextTrack.album+" by "+msg.state.nextTrack.artist+".");
 		colorCache[nextArtistAlbum] = result.body.tags;
 	});
 
 });
 
+
 function getColors(artist, album, callback) {
+	// use album-covers to query lastfm
 	covers.search({
 		artist: artist,
 		album: album,
 		size: 'mega'
 	}, function(err, res) {
 		if (err) {
-			console.log(err);
+			logMe(err);
 			return;
 		}
-		console.log('calling out');
+		logMe('calling out to ColorAPI');
+		// grab our results from lastFM, and turn around and send them to the ColorAPI
 		unirest.get("https://apicloud-colortag.p.mashape.com/tag-url.json?palette=simple&sort=weight&url="+encodeURIComponent(res))
 			.header("X-Mashape-Key", config.mashapeKey)
 			.header("Accept", "application/json")
 			.end(function (result) {
+				// And invoke the supplied callback
 				callback(result);
 		});
 
@@ -94,14 +116,17 @@ function getColors(artist, album, callback) {
 
 }
 
+// function to actually light up the hues
 function lightItUp(colors) {
+	// go through each of the supplied colors (from the Color API)
 	for (var ti = 0; ti < colors.length; ti++) {
+		// And if we haven't defined any lights for this color dominance level, continue
 		if (lights[ti] === undefined) {
 			continue;
 		}
 		var thisColor=colors[ti].color.replace('#','');
-		console.log(thisColor);
-		console.log(hexToRgb(thisColor));
+		// otherwise, cycle through all the lights we've assigned the dominance level, and
+		// set their values to the color for this level
 		for (var li = 0; li < lights[ti].length; li++) {
 		    var state = lightState.create().on().rgb(hexToRgb(thisColor));
 		    api.setLightState(parseInt(lights[ti][li]), state)
@@ -114,21 +139,21 @@ function lightItUp(colors) {
 }
 
 var displayError = function(err) {
-    console.log("Error: "+err);
+    logMe("Error: "+err);
 };
 
 var displayResult = function(result) {
-	console.log("Result: " + JSON.stringify(result));
+	logMe("Result: " + JSON.stringify(result));
 };
 
 var registeredUser = function(registerResult) {
-	console.log('Created user '+APP_USERNAME);
+	logMe('Created user '+APP_USERNAME);
 	api = new HueApi(hostname,APP_USERNAME);
 	api.lights().then(showLights);
 };
 
 var findBridges = function(bridge) {
-	console.log("Hue Bridges Found: " + JSON.stringify(bridge));
+	logMe("Hue Bridges Found: " + JSON.stringify(bridge));
 	if (bridge.length == 0) {
 		return;
 	}
@@ -146,14 +171,14 @@ var checkConfig = function(result) {
 		.done();
 	}
 	else {
-		console.log(JSON.stringify(result));
+		logMe(JSON.stringify(result));
 		return api.lights();
 	}
-    console.log('config results: '+JSON.stringify(result, null, 2));
+    logMe('config results: '+JSON.stringify(result, null, 2));
 };
 
 var showLights = function(result) {
-    console.log('Lights: '+JSON.stringify(result, null, 2));
+    logMe('Lights: '+JSON.stringify(result, null, 2));
     if (result === undefined || result.lights === undefined) {
     	return;
     }
@@ -169,13 +194,18 @@ var showLights = function(result) {
     		}
     	}
     }
-    console.log(lights);
+    logMe(lights);
 };
 
-// --------------------------
-// Using a promise
+// Go through the routine of checking for a bridge, creating a new app if necessary, finding out lights
+// and creating the object we'll use to assign colors to lights
 hue.nupnpSearch().then(findBridges).then(checkConfig).then(showLights).done();
 
+function logMe(msg) {
+	if (VERBOSE_MODE) {
+		console.log(msg);
+	}
+}
 
 function hexToRgb(hex) {
     var bigint = parseInt(hex, 16);

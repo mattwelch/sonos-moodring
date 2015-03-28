@@ -2,15 +2,14 @@
   "name": "sonos-moodring",
   "version": "1.0.0",
   "description": "Hue lights rendering dominant color of Sonos currently playing song album cover",
-  "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
-  "author": "",
+  "author": "Matt Welch <matt@welcher.net>",
   "license": "ISC",
   "dependencies": {
     "album-cover": "0.0.3",
-    "lastfm": "^0.9.2",
+    "nedb": "^1.1.1",
     "node-hue-api": "^1.0.5",
     "sonos-discovery": "https://github.com/jishi/node-sonos-discovery/archive/0.15.3.tar.gz",
     "unirest": "^0.4.0"
