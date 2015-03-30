@@ -9,8 +9,8 @@
   "license": "ISC",
   "dependencies": {
     "album-cover": "0.0.3",
-    "nedb": "^1.1.1",
     "node-hue-api": "^1.0.5",
+    "node-persist": "0.0.3",
     "sonos-discovery": "https://github.com/jishi/node-sonos-discovery/archive/0.15.3.tar.gz",
     "unirest": "^0.4.0"
   }

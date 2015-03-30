@@ -1,2 +1,4 @@
 node_modules/
+persist/
 config.js
+npm-debug.log

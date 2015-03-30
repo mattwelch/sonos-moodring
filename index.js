@@ -8,6 +8,8 @@ var NEXT_SONG_CACHING_ENABLED = true;
 var APP_USERNAME = "sonos-moodring";
 var APP_DESCRIPTION = "Display cover art colors from Sonos";
 var VERBOSE_MODE = true;
+var COLOR_PALETTE = "simple"; // simple, w3c, or precise
+var COLOR_SORT = "weight"; // weight or relevance
 
 /* <><><><><><><><><><><><><><>*/
 /* DO NOT EDIT PAST THIS LINE  */
@@ -28,7 +30,10 @@ var hue = require("node-hue-api"),
 
 var api, hostname;
 var lights = {};
-var colorCache = {};
+var storage = require('node-persist');
+
+
+storage.initSync();
 
 // Wait until the Sonos discovery process is done, then grab our player
 discovery.on('topology-change', function() {
@@ -47,45 +52,50 @@ discovery.on('transport-state', function(msg) {
 	var currentArtistAlbum = msg.state.currentTrack.artist+msg.state.currentTrack.album;
 	var nextArtistAlbum = msg.state.nextTrack !== undefined?msg.state.nextTrack.artist+msg.state.nextTrack.album:'';
 
+	var currentCache = storage.getItem(currentArtistAlbum);
+
 	// If we've already fetched this albumArtist, no need to burn an API call fetching it again
-    if (colorCache[currentArtistAlbum] !== undefined && colorCache[currentArtistAlbum].length > 0) {
+    if (currentCache !== undefined && currentCache.length > 0) {
 		logMe("Got cached results for album "+msg.state.currentTrack.album+" by "+msg.state.currentTrack.artist+".");
-    	lightItUp(colorCache[currentArtistAlbum]);
+    	lightItUp(currentCache);
     }
     // If not, let's grab it
-    else if (colorCache[currentArtistAlbum] === undefined) {
-    	colorCache[currentArtistAlbum] = [];
+    else if (currentCache === undefined) {
     	// Call our getColors method, passing in a callback to act on the results
     	getColors(msg.state.currentTrack.artist, msg.state.currentTrack.album, function(result) {
 			// If we didn't get anything back, assume no cover art for this artistAlbum, and
 			// set our default colors
 			if (result.body === undefined || result.body.tags === undefined) {
 				logMe("No artwork found for "+msg.state.currentTrack.album+" by "+msg.state.currentTrack.artist+".");
-				colorCache[currentArtistAlbum] = ERROR_OR_NO_RESULT_COLOR;
+				storage.setItem(currentArtistAlbum,ERROR_OR_NO_RESULT_COLOR);
 				lightItUp(ERROR_OR_NO_RESULT_COLOR);
 				return;
 			}
 			// ...otherwise, cache our results and set the lights to those results
 			logMe("Fetched color for album "+msg.state.currentTrack.album+" by "+msg.state.currentTrack.artist+".");
-			colorCache[currentArtistAlbum] = result.body.tags;
+			storage.setItem(currentArtistAlbum,result.body.tags);
 			lightItUp(result.body.tags);
     	});
     }
 
+    if (nextArtistAlbum == '' || !NEXT_SONG_CACHING_ENABLED || nextArtistAlbum == currentArtistAlbum) {
+    	return;
+    }
+	var nextCache = storage.getItem(nextArtistAlbum);
+
     // If there is no next album, or we've already fetched it, or we've disabled next album caching, finish up
-    if (nextArtistAlbum == '' || colorCache[nextArtistAlbum] !== undefined || !NEXT_SONG_CACHING_ENABLED) {
+    if (nextCache !== undefined) {
     	return;
     }
     // otherwise, go through the same flow for the next song (minus the actual setting of the lights)
-	colorCache[nextArtistAlbum] = [];
 	getColors(msg.state.nextTrack.artist, msg.state.nextTrack.album, function(result) {
 		if (result.body === undefined || result.body.tags === undefined) {
 			logMe("No artwork found for next album "+msg.state.nextTrack.album+" by "+msg.state.nextTrack.artist+".");
-			colorCache[nextArtistAlbum] = ERROR_OR_NO_RESULT_COLOR;
+			storage.setItem(nextArtistAlbum,ERROR_OR_NO_RESULT_COLOR);
 			return;
 		}
 		logMe("Cached next album "+msg.state.nextTrack.album+" by "+msg.state.nextTrack.artist+".");
-		colorCache[nextArtistAlbum] = result.body.tags;
+		storage.setItem(nextArtistAlbum,result.body.tags);
 	});
 
 });
@@ -104,7 +114,7 @@ function getColors(artist, album, callback) {
 		}
 		logMe('calling out to ColorAPI');
 		// grab our results from lastFM, and turn around and send them to the ColorAPI
-		unirest.get("https://apicloud-colortag.p.mashape.com/tag-url.json?palette=simple&sort=weight&url="+encodeURIComponent(res))
+		unirest.get("https://apicloud-colortag.p.mashape.com/tag-url.json?palette="+COLOR_PALETTE+"&sort="+COLOR_SORT+"&url="+encodeURIComponent(res))
 			.header("X-Mashape-Key", config.mashapeKey)
 			.header("Accept", "application/json")
 			.end(function (result) {
